@@ -17,6 +17,184 @@
 
 use crate::cast::*;
 
+const MIN_DECIMAL_F64_POWER: i32 = -(Decimal256Type::MAX_SCALE as i32);
+// Bit patterns produced by `10_f64.powi(exp)` for every valid Arrow decimal
+// scale. Using the exact bit patterns preserves the existing lossy cast results,
+// including the rounding of powers that cannot be represented exactly as f64.
+const DECIMAL_F64_POWERS_OF_TEN: [f64; Decimal256Type::MAX_SCALE as usize * 2 + 1] = [
+    f64::from_bits(0x3027288e1271f512), // 10^-76
+    f64::from_bits(0x305cf2b1970e7257), // 10^-75
+    f64::from_bits(0x309217aefe690776), // 10^-74
+    f64::from_bits(0x30c69d9abe034954), // 10^-73
+    f64::from_bits(0x30fc45016d841ba9), // 10^-72
+    f64::from_bits(0x3131ab20e472914a), // 10^-71
+    f64::from_bits(0x316615e91d8f359c), // 10^-70
+    f64::from_bits(0x319b9b6364f30304), // 10^-69
+    f64::from_bits(0x31d1411e1f17e1e2), // 10^-68
+    f64::from_bits(0x32059165a6ddda5b), // 10^-67
+    f64::from_bits(0x323af5bf109550f1), // 10^-66
+    f64::from_bits(0x3270d9976a5d5296), // 10^-65
+    f64::from_bits(0x32a50ffd44f4a73c), // 10^-64
+    f64::from_bits(0x32da53fc9631d10c), // 10^-63
+    f64::from_bits(0x3310747ddddf22a8), // 10^-62
+    f64::from_bits(0x3344919d5556eb52), // 10^-61
+    f64::from_bits(0x3379b604aaaca627), // 10^-60
+    f64::from_bits(0x33b011c2eaabe7d8), // 10^-59
+    f64::from_bits(0x33e41633a556e1cd), // 10^-58
+    f64::from_bits(0x34191bc08eac9a40), // 10^-57
+    f64::from_bits(0x344f62b0b257c0d1), // 10^-56
+    f64::from_bits(0x34839dae6f76d883), // 10^-55
+    f64::from_bits(0x34b8851a0b548ea3), // 10^-54
+    f64::from_bits(0x34eea6608e29b24d), // 10^-53
+    f64::from_bits(0x352327fc58da0f70), // 10^-52
+    f64::from_bits(0x3557f1fb6f10934c), // 10^-51
+    f64::from_bits(0x358dee7a4ad4b81e), // 10^-50
+    f64::from_bits(0x35c2b50c6ec4f313), // 10^-49
+    f64::from_bits(0x35f7624f8a762fd8), // 10^-48
+    f64::from_bits(0x362d3ae36d13bbce), // 10^-47
+    f64::from_bits(0x366244ce242c5561), // 10^-46
+    f64::from_bits(0x3696d601ad376ab9), // 10^-45
+    f64::from_bits(0x36cc8b8218854567), // 10^-44
+    f64::from_bits(0x3701d7314f534b61), // 10^-43
+    f64::from_bits(0x37364cfda3281e38), // 10^-42
+    f64::from_bits(0x376be03d0bf225c7), // 10^-41
+    f64::from_bits(0x37a16c262777579c), // 10^-40
+    f64::from_bits(0x37d5c72fb1552d83), // 10^-39
+    f64::from_bits(0x380b38fb9daa78e4), // 10^-38
+    f64::from_bits(0x3841039d428a8b8e), // 10^-37
+    f64::from_bits(0x38754484932d2e72), // 10^-36
+    f64::from_bits(0x38aa95a5b7f87a0f), // 10^-35
+    f64::from_bits(0x38e09d8792fb4c49), // 10^-34
+    f64::from_bits(0x3914c4e977ba1f5b), // 10^-33
+    f64::from_bits(0x3949f623d5a8a732), // 10^-32
+    f64::from_bits(0x398039d665896880), // 10^-31
+    f64::from_bits(0x39b4484bfeebc29f), // 10^-30
+    f64::from_bits(0x39e95a5efea6b348), // 10^-29
+    f64::from_bits(0x3a1fb0f6be50601a), // 10^-28
+    f64::from_bits(0x3a53ce9a36f23c10), // 10^-27
+    f64::from_bits(0x3a88c240c4aecb13), // 10^-26
+    f64::from_bits(0x3abef2d0f5da7dd8), // 10^-25
+    f64::from_bits(0x3af357c299a88ea8), // 10^-24
+    f64::from_bits(0x3b282db34012b252), // 10^-23
+    f64::from_bits(0x3b5e392010175ee6), // 10^-22
+    f64::from_bits(0x3b92e3b40a0e9b4f), // 10^-21
+    f64::from_bits(0x3bc79ca10c924223), // 10^-20
+    f64::from_bits(0x3bfd83c94fb6d2ac), // 10^-19
+    f64::from_bits(0x3c32725dd1d243ac), // 10^-18
+    f64::from_bits(0x3c670ef54646d497), // 10^-17
+    f64::from_bits(0x3c9cd2b297d889bc), // 10^-16
+    f64::from_bits(0x3cd203af9ee75616), // 10^-15
+    f64::from_bits(0x3d06849b86a12b9b), // 10^-14
+    f64::from_bits(0x3d3c25c268497682), // 10^-13
+    f64::from_bits(0x3d719799812dea11), // 10^-12
+    f64::from_bits(0x3da5fd7fe1796495), // 10^-11
+    f64::from_bits(0x3ddb7cdfd9d7bdbb), // 10^-10
+    f64::from_bits(0x3e112e0be826d695), // 10^-9
+    f64::from_bits(0x3e45798ee2308c3a), // 10^-8
+    f64::from_bits(0x3e7ad7f29abcaf48), // 10^-7
+    f64::from_bits(0x3eb0c6f7a0b5ed8d), // 10^-6
+    f64::from_bits(0x3ee4f8b588e368f1), // 10^-5
+    f64::from_bits(0x3f1a36e2eb1c432d), // 10^-4
+    f64::from_bits(0x3f50624dd2f1a9fc), // 10^-3
+    f64::from_bits(0x3f847ae147ae147b), // 10^-2
+    f64::from_bits(0x3fb999999999999a), // 10^-1
+    f64::from_bits(0x3ff0000000000000), // 10^0
+    f64::from_bits(0x4024000000000000), // 10^1
+    f64::from_bits(0x4059000000000000), // 10^2
+    f64::from_bits(0x408f400000000000), // 10^3
+    f64::from_bits(0x40c3880000000000), // 10^4
+    f64::from_bits(0x40f86a0000000000), // 10^5
+    f64::from_bits(0x412e848000000000), // 10^6
+    f64::from_bits(0x416312d000000000), // 10^7
+    f64::from_bits(0x4197d78400000000), // 10^8
+    f64::from_bits(0x41cdcd6500000000), // 10^9
+    f64::from_bits(0x4202a05f20000000), // 10^10
+    f64::from_bits(0x42374876e8000000), // 10^11
+    f64::from_bits(0x426d1a94a2000000), // 10^12
+    f64::from_bits(0x42a2309ce5400000), // 10^13
+    f64::from_bits(0x42d6bcc41e900000), // 10^14
+    f64::from_bits(0x430c6bf526340000), // 10^15
+    f64::from_bits(0x4341c37937e08000), // 10^16
+    f64::from_bits(0x4376345785d8a000), // 10^17
+    f64::from_bits(0x43abc16d674ec800), // 10^18
+    f64::from_bits(0x43e158e460913d00), // 10^19
+    f64::from_bits(0x4415af1d78b58c40), // 10^20
+    f64::from_bits(0x444b1ae4d6e2ef50), // 10^21
+    f64::from_bits(0x4480f0cf064dd592), // 10^22
+    f64::from_bits(0x44b52d02c7e14af6), // 10^23
+    f64::from_bits(0x44ea784379d99db4), // 10^24
+    f64::from_bits(0x45208b2a2c280291), // 10^25
+    f64::from_bits(0x4554adf4b7320335), // 10^26
+    f64::from_bits(0x4589d971e4fe8402), // 10^27
+    f64::from_bits(0x45c027e72f1f1281), // 10^28
+    f64::from_bits(0x45f431e0fae6d721), // 10^29
+    f64::from_bits(0x46293e5939a08cea), // 10^30
+    f64::from_bits(0x465f8def8808b024), // 10^31
+    f64::from_bits(0x4693b8b5b5056e17), // 10^32
+    f64::from_bits(0x46c8a6e32246c99d), // 10^33
+    f64::from_bits(0x46fed09bead87c04), // 10^34
+    f64::from_bits(0x4733426172c74d82), // 10^35
+    f64::from_bits(0x476812f9cf7920e3), // 10^36
+    f64::from_bits(0x479e17b84357691c), // 10^37
+    f64::from_bits(0x47d2ced32a16a1b1), // 10^38
+    f64::from_bits(0x48078287f49c4a1e), // 10^39
+    f64::from_bits(0x483d6329f1c35ca5), // 10^40
+    f64::from_bits(0x48725dfa371a19e7), // 10^41
+    f64::from_bits(0x48a6f578c4e0a061), // 10^42
+    f64::from_bits(0x48dcb2d6f618c879), // 10^43
+    f64::from_bits(0x4911efc659cf7d4c), // 10^44
+    f64::from_bits(0x49466bb7f0435c9f), // 10^45
+    f64::from_bits(0x497c06a5ec5433c6), // 10^46
+    f64::from_bits(0x49b18427b3b4a05c), // 10^47
+    f64::from_bits(0x49e5e531a0a1c873), // 10^48
+    f64::from_bits(0x4a1b5e7e08ca3a90), // 10^49
+    f64::from_bits(0x4a511b0ec57e649a), // 10^50
+    f64::from_bits(0x4a8561d276ddfdc0), // 10^51
+    f64::from_bits(0x4ababa4714957d30), // 10^52
+    f64::from_bits(0x4af0b46c6cdd6e3e), // 10^53
+    f64::from_bits(0x4b24e1878814c9ce), // 10^54
+    f64::from_bits(0x4b5a19e96a19fc41), // 10^55
+    f64::from_bits(0x4b905031e2503da9), // 10^56
+    f64::from_bits(0x4bc4643e5ae44d14), // 10^57
+    f64::from_bits(0x4bf97d4df19d6058), // 10^58
+    f64::from_bits(0x4c2fdca16e04b86e), // 10^59
+    f64::from_bits(0x4c63e9e4e4c2f344), // 10^60
+    f64::from_bits(0x4c98e45e1df3b015), // 10^61
+    f64::from_bits(0x4ccf1d75a5709c1b), // 10^62
+    f64::from_bits(0x4d03726987666191), // 10^63
+    f64::from_bits(0x4d384f03e93ff9f6), // 10^64
+    f64::from_bits(0x4d6e62c4e38ff874), // 10^65
+    f64::from_bits(0x4da2fdbb0e39fb48), // 10^66
+    f64::from_bits(0x4dd7bd29d1c87a1a), // 10^67
+    f64::from_bits(0x4e0dac74463a98a1), // 10^68
+    f64::from_bits(0x4e428bc8abe49f64), // 10^69
+    f64::from_bits(0x4e772ebad6ddc73e), // 10^70
+    f64::from_bits(0x4eacfa698c95390d), // 10^71
+    f64::from_bits(0x4ee21c81f7dd43a8), // 10^72
+    f64::from_bits(0x4f16a3a275d49492), // 10^73
+    f64::from_bits(0x4f4c4c8b1349b9b7), // 10^74
+    f64::from_bits(0x4f81afd6ec0e1412), // 10^75
+    f64::from_bits(0x4fb61bcca7119917), // 10^76
+];
+
+/// Returns `10^exp` from a precomputed lookup table for decimal scales. Scales
+/// outside the range supported by Arrow decimal types retain `f64::powi`
+/// semantics rather than indexing outside the table.
+#[inline]
+pub(super) fn f64_power_of_ten(exp: i32) -> f64 {
+    let Some(index) = exp
+        .checked_sub(MIN_DECIMAL_F64_POWER)
+        .and_then(|index| usize::try_from(index).ok())
+    else {
+        return 10_f64.powi(exp);
+    };
+
+    DECIMAL_F64_POWERS_OF_TEN
+        .get(index)
+        .copied()
+        .unwrap_or_else(|| 10_f64.powi(exp))
+}
+
 /// A utility trait that provides checked conversions between
 /// decimal types inspired by [`NumCast`]
 pub trait DecimalCast: Sized {
@@ -173,12 +351,7 @@ where
 {
     let delta_scale = output_scale - input_scale;
 
-    // O::MAX_FOR_EACH_PRECISION[k] stores 10^k - 1 (e.g., 9, 99, 999, ...).
-    // Adding 1 yields exactly 10^k without computing a power at runtime.
-    // Using the precomputed table avoids pow(10, k) and its checked/overflow
-    // handling, which is faster and simpler for scaling by 10^delta_scale.
-    let max = O::MAX_FOR_EACH_PRECISION.get(delta_scale as usize)?;
-    let mul = max.add_wrapping(O::Native::ONE);
+    let mul = O::power_of_ten(delta_scale as u32)?;
     let f_fallible = move |x| O::Native::from_decimal(x).and_then(|x| x.mul_checked(mul).ok());
 
     // if the gain in precision (digits) is greater than the multiplication due to scaling
@@ -228,9 +401,7 @@ where
     // possible result is 999999999/10000000000 = 0.0999999999, which rounds to zero. Smaller values
     // (e.g. 1/10000000000) or larger delta_scale (e.g. 999999999/10000000000000) produce even
     // smaller results, which also round to zero. In that case, just return an array of zeros.
-    let max = I::MAX_FOR_EACH_PRECISION.get(delta_scale as usize)?;
-
-    let div = max.add_wrapping(I::Native::ONE);
+    let div = I::power_of_ten(delta_scale as u32)?;
     let half = div.div_wrapping(I::Native::ONE.add_wrapping(I::Native::ONE));
     let half_neg = half.neg_wrapping();
 
@@ -778,7 +949,7 @@ where
     D: DecimalType + ArrowPrimitiveType,
     <D as ArrowPrimitiveType>::Native: DecimalCast,
 {
-    let mul = 10_f64.powi(scale as i32);
+    let mul = f64_power_of_ten(scale as i32);
 
     if cast_options.safe {
         array
@@ -821,7 +992,6 @@ where
 
 pub(crate) fn cast_decimal_to_integer<D, T>(
     array: &dyn Array,
-    base: D::Native,
     scale: i8,
     cast_options: &CastOptions,
 ) -> Result<ArrayRef, ArrowError>
@@ -833,7 +1003,7 @@ where
 {
     let array = array.as_primitive::<D>();
 
-    let div: D::Native = base.pow_checked(scale.unsigned_abs() as u32).map_err(|_| {
+    let div = D::power_of_ten(scale.unsigned_abs() as u32).ok_or_else(|| {
         ArrowError::CastError(format!(
             "Cannot cast to {:?}. The scale {} causes overflow.",
             D::PREFIX,
@@ -941,6 +1111,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_f64_power_of_ten_lookup() {
+        for exp in -Decimal256Type::MAX_SCALE as i32..=Decimal256Type::MAX_SCALE as i32 {
+            assert_eq!(f64_power_of_ten(exp), 10_f64.powi(exp), "10^{exp}");
+        }
+
+        for exp in [-77, 77] {
+            assert_eq!(f64_power_of_ten(exp), 10_f64.powi(exp), "10^{exp}");
+        }
+    }
 
     #[test]
     fn test_parse_string_to_decimal_native() -> Result<(), ArrowError> {

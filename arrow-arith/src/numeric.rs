@@ -968,6 +968,21 @@ fn date_op<T: DateOp>(
 }
 
 /// Perform arithmetic operation on decimal arrays
+#[inline]
+fn decimal_power_checked<T: DecimalType>(exp: u32) -> Result<T::Native, ArrowError> {
+    T::power_of_ten(exp).ok_or_else(|| {
+        ArrowError::ArithmeticOverflow(format!(
+            "Overflow happened on: {:?} ^ {exp:?}",
+            T::Native::usize_as(10)
+        ))
+    })
+}
+
+#[inline]
+fn decimal_power_wrapping<T: DecimalType>(exp: u32) -> T::Native {
+    T::power_of_ten(exp).unwrap_or_else(|| T::Native::usize_as(10).pow_wrapping(exp))
+}
+
 fn decimal_op<T: DecimalType>(
     op: Op,
     l: &dyn Array,
@@ -999,8 +1014,8 @@ fn decimal_op<T: DecimalType>(
                     .saturating_add(1)
                     .min(T::MAX_PRECISION);
 
-            let l_mul = T::Native::usize_as(10).pow_checked((result_scale - s1) as _)?;
-            let r_mul = T::Native::usize_as(10).pow_checked((result_scale - s2) as _)?;
+            let l_mul = decimal_power_checked::<T>((result_scale - s1) as _)?;
+            let r_mul = decimal_power_checked::<T>((result_scale - s2) as _)?;
 
             match op {
                 // Equal scales make both decimal multipliers one.
@@ -1060,14 +1075,11 @@ fn decimal_op<T: DecimalType>(
             let result_precision = (mul_pow.saturating_add(*p1 as i8) as u8).min(T::MAX_PRECISION);
 
             let (l_mul, r_mul) = match mul_pow.cmp(&0) {
-                Ordering::Greater => (
-                    T::Native::usize_as(10).pow_checked(mul_pow as _)?,
-                    T::Native::ONE,
-                ),
+                Ordering::Greater => (decimal_power_checked::<T>(mul_pow as _)?, T::Native::ONE),
                 Ordering::Equal => (T::Native::ONE, T::Native::ONE),
                 Ordering::Less => (
                     T::Native::ONE,
-                    T::Native::usize_as(10).pow_checked(mul_pow.neg_wrapping() as _)?,
+                    decimal_power_checked::<T>(mul_pow.neg_wrapping() as _)?,
                 ),
             };
 
@@ -1089,8 +1101,8 @@ fn decimal_op<T: DecimalType>(
                 (result_scale.saturating_add((*p1 as i8 - s1).min(*p2 as i8 - s2)) as u8)
                     .min(T::MAX_PRECISION);
 
-            let l_mul = T::Native::usize_as(10).pow_wrapping((result_scale - s1) as _);
-            let r_mul = T::Native::usize_as(10).pow_wrapping((result_scale - s2) as _);
+            let l_mul = decimal_power_wrapping::<T>((result_scale - s1) as _);
+            let r_mul = decimal_power_wrapping::<T>((result_scale - s2) as _);
 
             try_op!(
                 l,

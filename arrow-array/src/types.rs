@@ -1400,6 +1400,15 @@ pub trait DecimalType:
 
     /// Determines whether `value` contains no more than `precision` decimal digits
     fn is_valid_decimal_precision(value: Self::Native, precision: u8) -> bool;
+
+    /// Returns the precomputed value `10^exp`, or `None` if `exp` exceeds the
+    /// maximum precision supported by this decimal type.
+    #[inline]
+    fn power_of_ten(exp: u32) -> Option<Self::Native> {
+        Self::MAX_FOR_EACH_PRECISION
+            .get(exp as usize)
+            .map(|max| max.add_wrapping(Self::Native::ONE))
+    }
 }
 
 /// Validate that `precision` and `scale` are valid for `T`
@@ -1800,8 +1809,29 @@ impl ByteViewType for BinaryViewType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow_buffer::ArrowNativeType;
     use arrow_data::{BufferSpec, layout};
     use chrono::DateTime;
+
+    #[test]
+    fn decimal_power_of_ten_lookup() {
+        fn test_type<T: DecimalType>() {
+            let ten = T::Native::usize_as(10);
+            let mut expected = T::Native::ONE;
+
+            for exp in 0..=T::MAX_PRECISION as u32 {
+                assert_eq!(T::power_of_ten(exp), Some(expected));
+                expected = expected.mul_wrapping(ten);
+            }
+
+            assert_eq!(T::power_of_ten(T::MAX_PRECISION as u32 + 1), None);
+        }
+
+        test_type::<Decimal32Type>();
+        test_type::<Decimal64Type>();
+        test_type::<Decimal128Type>();
+        test_type::<Decimal256Type>();
+    }
 
     #[test]
     fn month_day_nano_should_roundtrip() {

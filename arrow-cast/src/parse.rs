@@ -893,9 +893,13 @@ fn parse_e_notation<T: DecimalType>(
     }
 
     if exp < 0 {
-        result = result.div_wrapping(base.pow_wrapping(-exp as _));
+        let exp = exp.unsigned_abs() as u32;
+        let power = T::power_of_ten(exp).unwrap_or_else(|| base.pow_wrapping(exp));
+        result = result.div_wrapping(power);
     } else {
-        result = result.mul_wrapping(base.pow_wrapping(exp as _));
+        let exp = exp as u32;
+        let power = T::power_of_ten(exp).unwrap_or_else(|| base.pow_wrapping(exp));
+        result = result.mul_wrapping(power);
     }
 
     Ok(result)
@@ -1025,7 +1029,7 @@ pub fn parse_decimal<T: DecimalType>(
                     "parse decimal overflow ({s})"
                 )));
             }
-            let mul = base.pow_wrapping(exp as _);
+            let mul = T::power_of_ten(exp as u32).unwrap_or_else(|| base.pow_wrapping(exp as u32));
             result = result.mul_wrapping(mul);
         } else if digits > precision {
             return Err(ArrowError::ParseError(format!(
