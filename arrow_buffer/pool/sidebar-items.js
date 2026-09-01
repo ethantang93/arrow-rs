@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["lock_reservation"],"struct":["Tracker","TrackingMemoryPool"],"trait":["MemoryPool","MemoryReservation"]};
